@@ -1,0 +1,256 @@
+---
+title: 'Sampling: Sampling Plan'
+author: "Xianbin Cheng"
+date: "September 7, 2018"
+output: html_document
+---
+
+# Method
+
+1. Load libraries and source R code.
+
+```{r, warning = FALSE, message = FALSE}
+source(file = "Sampling_libraries.R")
+source(file = "Sampling_contamination.R")
+source(file = "Sampling_visualization.R")
+source(file = "Sampling_plan.R")
+```
+
+```{r}
+sessionInfo()
+```
+
+2. List important parameters from `Sampling_contamination.R`.
+
+* `n_contam` = the number of contamination points  
+* `x_lim` = the limits of the horizontal axis  
+* `y_lim` = the limits of the vertical axis  
+* `x` = the horizontal coordinate of the contamination center, which follows a uniform distribution (`U(0,10)`)
+* `y` = the vertical coordinate of the contamination center, which follows a uniform distribution(`U(0,10)`)  
+* `cont_level` = a vector that indicates the mean contamination level (logCFU/g or logCFU/mL) and the standard deviation in a log scale, assuming contamination level follows a log normal distribution $ln(cont\_level)$~$N(\mu, \sigma^2)$.  
+
+** Mode 1: Discrete Spread** 
+
+* `n_affected` = the number of affected plants near the contamination spot, which follows a Poisson distribution (`Pois(lambda = 5)`)   
+* `covar_mat` = covariance matrix of `x` and `y`, which defines the spread of contamination. Assume the spread follows a 2D normal distribution with var(X) = 0.25, var(Y) = 0.25 and cov(X, Y) = 0  
+
+** Mode 2: Continuous Spread**
+
+* `spread_radius` = the radius of the contamination spread
+* `LOC` = the limit of contribution of contamination. By default, it is set at 0.001.(Both `spread_radius` and `LOC` determine the shape of decay function that describes how much contamination from the source is contributed to a target point.)
+* `fun` = the decay function that describes the spread. It takes either "exp" or "norm".
+
+```{r}
+## The input parameters
+n_contam = rpois(n = 1, lambda = 3)
+x_lim = c(0, 10)
+y_lim = c(0, 10)
+cont_level = c(7, 1)
+
+### Mode 1
+n_affected = rpois(n = 1, lambda = 5)
+covar_mat = matrix(data = c(0.25, 0, 0, 0.25), nrow = 2, ncol = 2)
+
+### Mode 2
+spread_radius = 2.5
+LOC = 10^(-3)
+fun = "exp"
+```
+
+```{r}
+# Generate the coordinates of contamination points
+contam_xy = sim_contam(n_contam = n_contam, xlim = x_lim, ylim = y_lim, covariance = covar_mat, n_affected = n_affected, radius = spread_radius, cont_level = cont_level) 
+```
+
+```{r}
+## Basic info of the contamination simulation
+str(contam_xy)
+
+summary(contam_xy$label)
+```
+
+
+3. Define parameters for generating sampling plans.
+
+* `n_sp` = the number of sampling points
+* `sp_radius` = the radius (m) of a circular region around the sample point. (Only applicable to **Mode 1: Discrete Spread**)
+* `n_strata` = the number of strata (applicable to *Stratified random sampling*)
+* `by` = the side along which the field is divided into strata. It is either "row" or "column" (applicable to *Stratified random sampling*) **OR** the side along which a sample is taken every k steps (applicable to *Systematic sampling*).
+
+**Mode 1: Discrete Spread**   
+* `m_kbar` = averaged kernel weight (g)
+* `m_sp` = the analytical sample weight (25 g)
+* `conc_good` = concentration of toxin in healthy kernels
+
+```{r}
+n_sp = 15
+sp_radius = 1
+n_strata = 5
+by = "row"
+
+m_kbar = 0.3
+m_sp = 25
+conc_good = 0.1
+```
+
+4. Show all the functions that are necessary for generating sampling plans.
+
+
+```{r}
+# Create a function that calculates the boundaries of each stratum
+calc_bounds
+
+# Create a function that generates a simple random sampling plan
+sim_plan_srs
+
+# Create a function that generates a stratified random sampling plan
+sim_plan_strs
+
+# Create a function that generates a systematic sampling plan
+sim_plan_ss
+
+# A function that calculates contamination contribution
+f_decay
+
+## Calculate the percent of contamination a source contributes to a sample point
+calc_perc_contam
+
+# Create a function that calculates contamination levels for each sample point and combine "contam_xy" and "sp_xy"
+gen_sim_data
+```
+
+5. Generate a sampling plan.
+
+    a) `method = "srs"` generates a simple random sampling plan with `n_sp` and `sp_radius`.
+    
+        i) Sample point coordinates follow a uniform distribution.
+
+    b) `method = "strs"` generates a stratified random sampling plan with `n_sp`, `sp_radius`, `n_strata` and `by`.
+    
+        i) Check whether `n_sp` is a multiple of `n_strata`.
+        
+        ii) Divide the field into strata either by row or by column.
+        
+        iii) Within each stratum, sample point coordinates follow a uniform distribution.
+    
+    c) `method = "ss"` generates a systematic sampling plan with `n_sp`, `sp_radius` and `by`.
+    
+        i) Split the field into `N` unit squares ($N = length \times width$).
+        
+        ii) Calculate `k`. $k = \frac {N} {n_{sp}}$.
+        
+        iii) In the first unit square, randomly select a sample point whose coordinates follow a uniform distribution.
+        
+        iv) Generate the rest of the sample points either along the x-axis or y-axis with the equation: $$x = x_0 + (n-1)k, n = 1, 2, ..., n_{sp} $$
+        
+        v) Arrange the sample points so that they distribute evenly within the field.
+
+```{r}
+# Run this if we want reproducibility
+#set.seed(123)
+```
+
+```{r}
+sp_xy = sim_plan(method = "ss", n_sp = n_sp, xlim = x_lim, ylim = y_lim, radius = sp_radius, by = by, n_strata = n_strata)
+
+str(sp_xy)
+```
+
+6. Calculate the contamination level of the sample points. Combine the `sp_xy` and `contam_xy`.
+
+    1) Calculate the Euclidean distance between sample points and contamination points. 
+    
+    a) **Discrete Spread:**
+    
+        i) Use the distance to keep the sample points that fall within `sp_radius`.
+        
+        ii) Calculate the contamination level of each sample point.
+        
+        $$C_i = \frac {\sum \limits_{j=1}^n C_{ij}\times \bar{m_{k}}} {m_{sp}} = \frac {\bar {m_k}} {m_{sp}} \times [C_{i1} + C_{i2} + ... + C_{ik} + (n_k - k)\times C_{good}] $$ 
+        
+        , where $C_i$ = contamination level of `sample point i`, 
+                        
+        $C_{ij}$ = contamination level of `kernel j` in `sample point i`,
+        
+        $\bar m_k$ = averaged weight of a single kernel,
+        
+        $m_{sp}$ = weight of an analytical unit,
+                        
+        $n_k$ = the total number of kernels in an analytical unit, calculated by $\frac {m_{sp}} {\bar m_k}$,
+                        
+        $k$ = the number of contamination spots or spreads in this sample,
+                        
+        $C_{good}$ = background contamination level.
+        
+    b) **Continuous Spread:**
+    
+        i) Use the distance and decay function to calculate the contamination contribution from each contamination point.
+        
+        ii) Sum up the contamination contribution from all source points for each sample point.
+        
+        $$C_{sp_i} = \sum \limits_{j=1}^n C_{cpj} \times f(d_{ij}) =  C_{cp1}\times f(d_{i1})+ C_{cp2}\times f(d_{i2})+ ...+C_{cpn}\times f(d_{in})$$ 
+        
+        , where $C_{sp_i}$ = contamination level of `sample point i`,  
+        
+        $C_{cpj}$ = contamination level of `contamination point j` (`j` = 1, 2, ..., n),   
+        
+        $d_{ij}$ = distance between `sample point i` and `contamination point j`,
+        
+        $f(d)$ = decay function that calculates the contribution of contamination. When $d_{ij} > spread\_radius$, $f^*(d) = f(d)\times \frac {1} {\mu}$, where $\mu$ is the absolute value of mean contamination level. This process would reduce $C_{sp_i}$ to almost 0.
+
+```{r}
+dist_contam_sp = calc_dist(df_contam = contam_xy, df_sp = sp_xy)
+
+contam_sp_xy = gen_sim_data(df_contam = contam_xy, df_sp = sp_xy, dist = dist_contam_sp, spread_radius = spread_radius, sp_radius = sp_radius, LOC = LOC, fun = fun, m_kbar = m_kbar, m_sp = m_sp, conc_good = conc_good, cont_level = cont_level)
+```
+
+```{r}
+kable_styling(kable(x = contam_sp_xy, format = "html"), full_width = FALSE)
+```
+
+
+# Results
+
+1. Show the simulated contamination.
+
+```{r, eval = FALSE}
+# Mode 1: Discrete Spread
+plot_contam_dis = contam_draw(data = contam_xy, spread = "discrete", xlim = x_lim, ylim = y_lim)
+
+plot_contam_dis
+
+# Mode 2: Continuous Spread
+plot_contam_cont = contam_draw(data = contam_xy, spread = "continuous", xlim = x_lim, ylim = y_lim)
+
+plot_contam_cont
+```
+
+2. Show the sample points and sample regions.
+
+```{r, eval = FALSE}
+# Systematic sampling
+plot_sp_dis_ss = sp_draw(method = "ss", data = sp_xy, spread = "discrete", xlim = x_lim, ylim = y_lim, by = by)
+plot_sp_cont_ss = sp_draw(method = "ss", data = sp_xy, spread = "continuous", xlim = x_lim, ylim = y_lim, by = by)
+
+plot_sp_dis_ss
+plot_sp_cont_ss
+```
+
+3. Overlay the sampling plan on the simulated contamination plot.
+
+```{r}
+# Systematic sampling
+plot_overlay_dis_ss = overlay_draw(method = "ss", data = contam_sp_xy, spread = "discrete", xlim = x_lim, ylim = y_lim)
+
+plot_overlay_cont_ss = overlay_draw(method = "ss", data = contam_sp_xy, spread = "continuous", xlim = x_lim, ylim = y_lim)
+```
+
+```{r}
+plot_overlay_dis_ss
+
+plot_overlay_cont_ss
+```
+
+```{r}
+contam_level_draw(dimension = "3d", method = fun, spread_radius = spread_radius, LOC = LOC, df_contam = contam_xy, xlim = x_lim, ylim = y_lim, interactive = FALSE)
+```

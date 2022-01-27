@@ -1,0 +1,240 @@
+---
+title: 'Sampling: Analysis 2'
+author: "Xianbin Cheng"
+date: "January 9, 2019"
+output: html_document
+---
+
+# Objective  
+
+  * To analyze the simulated data (high prevalence) using linear regression.
+  
+# Methods
+
+1. Load the libraries and functions.
+
+```{r, warning = FALSE, message = FALSE}
+source("Sampling_libraries.R")
+source("Sampling_contamination.R")
+source("Sampling_plan.R")
+source("Sampling_assay.R")
+source("Sampling_outcome.R")
+source("Sampling_iteration.R")
+source("Sampling_analysis.R")
+source("Simulation_data.R")
+source("Sampling_visualization.R")
+library(lawstat)
+```
+
+```{r}
+sessionInfo()
+```
+
+
+2. List important parameters from previous R files. 
+
+**Contamination:**  
+
+  * `n_contam` = the number of contamination points 
+  * `x_lim` = the limits of the horizontal axis  
+  * `y_lim` = the limits of the vertical axis  
+  * `x` = the horizontal coordinate of the contamination center, which follows a uniform distribution (`U(0,10)`)
+  * `y` = the vertical coordinate of the contamination center, which follows a uniform distribution(`U(0,10)`)  
+  * `cont_level` = a vector that indicates the mean contamination level (logCFU/g or logCFU/mL) and the standard deviation in a log scale, assuming contamination level follows a log normal distribution $ln(cont\_level)$~$N(\mu, \sigma^2)$. 
+  * `spread` = the type of spread: `continuous` or `discrete`.
+
+  **Mode 1: Discrete Spread** 
+
+  * `n_affected` = the number of affected plants near the contamination spot, which follows a Poisson distribution (`Pois(lambda = 5)`)   
+  * `covar_mat` = covariance matrix of `x` and `y`, which defines the spread of contamination. Assume the spread follows a 2D normal distribution with var(X) =     0.25, var(Y) = 0.25 and cov(X, Y) = 0  
+
+  **Mode 2: Continuous Spread**
+
+  * `spread_radius` = the radius of the contamination spread. 
+  * `LOC` = the limit of contribution of contamination. By default, it is set at 0.001.(Both `spread_radius` and `LOC` determine the shape of decay function that describes how much contamination from the source is contributed to a target point.)
+  * `fun` = the decay function that describes the spread. It takes either "exp" or "norm".
+
+**Sampling Plan:**  
+
+  * `method_sp` = the sampling method (SRS, STRS, SS)
+  * `n_sp` = the number of sampling points
+  * `sp_radius` = the radius (m) of a circular region around the sample point. (Only applicable to **Mode 1: Discrete Spread**)
+  * `n_strata` = the number of strata (applicable to *Stratified random sampling*)
+  * `by` = the side along which the field is divided into strata. It is either "row" or "column" (applicable to *Stratified random sampling*) **OR** the side along which a sample is taken every k steps (applicable to *Systematic sampling*).
+  * `m_kbar` = averaged kernel weight (g). By default, it's 0.3 g (estimated from Texas corn).
+  * `m_sp` = the analytical sample weight (25 g)
+  * `conc_good` = concentration of toxin in healthy kernels
+  * `case` = 1 ~ 15 cases that define the stringency of the sampling plan.
+  * Attributes plans:
+      + `n` = number of analytical units (25g)
+      + `c` = maximum allowable number of analytical units yielding positive results
+      + `m` = microbial count or concentration above which an analytical unit is considered positive
+      + `M` = microbial count or concentration, if any analytical unit is above `M`, the lot is rejected.
+
+**Sampling Assay:**
+  
+  * `method_det` = method of detection
+      + Plating: LOD = 2500 CFU/g
+      + Enrichment: LOD = 1 CFU/g
+
+**Iteration:**
+
+  * `n_iter` = the number of iterations per simulation.
+
+```{r}
+## We choose "n_contam" to iterate on.
+n_contam = rpois(n = 1, lambda = 3)
+
+## Other fixed parameters
+## Contamination
+x_lim = c(0, 10)
+y_lim = c(0, 10)
+cont_level = c(7, 1)
+spread = "continuous"
+
+### Mode 1
+n_affected = rpois(n = 1, lambda = 5)
+covar_mat = matrix(data = c(0.25, 0, 0, 0.25), nrow = 2, ncol = 2)
+
+### Mode 2
+spread_radius = 1
+LOC = 10^(-3)
+fun = "exp"
+
+## Sampling plan
+method_sp = "srs"
+n_sp = 15
+sp_radius = 1
+n_strata = 5
+by = "row"
+m_kbar = 0.3
+m_sp = 25
+conc_good = 0.1
+case = 12
+m = 0
+M = 0
+Mc = 20
+
+## Assay
+method_det = "enrichment"
+
+## Sampling outcome
+n_iter = 100
+```
+
+3. Show the different combinations of `n_contam`, `n_sp`, `method_sp` to be analyzed.
+
+```{r}
+# First layer
+param_name = "n_contam"
+vals = c(1,2,3,4,5,6)
+
+# Second layer
+strategy_list = c("srs", "strs", "ss")
+
+# Third layer
+n_sp_list = c(5, 10, 15, 20, 30, 60)
+case_list = c(10, 11, 13, 12, 14, 15) # According to the attribute plan
+```
+
+```{r, echo = FALSE}
+temp = data.frame(n_contam = "1,2,3,4,5,6",
+                  prevalence = "3%,6%,9%,13%,16%,19%",
+                  n_sp = n_sp_list,
+                  n_strata = n_strata,
+                  by = by,
+                  spread = spread,
+                  method_sp = "srs/strs/ss",
+                  case = case_list,
+                  c = 0, 
+                  m = m, 
+                  iteration = n_iter*n_iter)
+
+kable_styling(kable(temp, format = "html", 
+                    caption = "TABLE. Combinations of input parameters"),
+              full_width = FALSE)
+```
+
+4. Read the simulation data.
+
+```{r}
+full_data = read.csv(file = "sim_data_1to6_5to60_3_10to15.csv", header = TRUE, stringsAsFactors = FALSE)
+```
+
+5. Build a linear regression model on the simulation data.
+
+  * Model: $Y = \beta_0 + \beta_1X_1+\beta_2X_2+ \beta_3X_3 + \beta_4X_1X_2+\beta_5X_1X_3+\beta_6X_2X_3+\varepsilon$
+  
+  * Main effects: `n_contam`, `method_sp`, `n_sp`. `method_sp` is a categorical variable with three levels: `srs`, `strs`, `ss`.
+  
+  * Interaction effects: two-way interactions of the above parameters
+
+5. Build a linear regression model on the simulation data.
+
+  * Model: $Y = \beta_0 + \beta_1X_1+\beta_2X_2+ \beta_3X_3 + \beta_4X_1X_2+\beta_5X_1X_3+\beta_6X_2X_3+\varepsilon$
+  
+  * Main effects: `n_contam`, `method_sp`, `n_sp`. `method_sp` is a categorical variable with three levels: `srs`, `strs`, `ss`.
+  
+  * Interaction effects: two-way interactions of the above parameters
+
+```{r}
+model = lm(formula = P_det ~ param + method_sp + n_sp + param:method_sp + param:n_sp + method_sp:n_sp, data = full_data)
+```
+
+6. Run the simulation once for visualization purpose.
+
+```{r}
+ArgList = list(n_contam = n_contam, xlim = x_lim, ylim = y_lim, n_affected = n_affected, covar_mat = covar_mat, spread_radius = spread_radius, method_sp = method_sp, n_sp = n_sp, sp_radius = sp_radius, spread = spread, n_strata = n_strata, by = by, cont_level = cont_level, LOC = LOC, fun = fun, m_kbar = m_kbar, m_sp = m_sp, conc_good = conc_good, case = case, m = m, M = M, Mc = Mc, method_det = method_det)
+
+one_iteration = do.call(what = sim_outcome_temp, args = ArgList) %>% .[[4]]
+```
+
+
+#Result
+
+1. Visualization
+
+```{r, warning = FALSE, echo = FALSE, out.width = "33%"}
+overlay_draw(method_sp = method_sp, data = one_iteration, spread = spread, xlim = x_lim, ylim = y_lim, n_strata = n_strata, by = by)
+contam_level_draw(dimension = "3d", method = fun, spread_radius = spread_radius, LOC = LOC, df_contam = one_iteration, xlim = x_lim, ylim = y_lim)
+assay_draw(df = one_iteration, M = M, m = m, Mc = Mc, method_det = method_det, spread = spread, case = case)
+```
+
+2. Linear regression results
+
+```{r}
+summary(model)
+plot(model)
+```
+
+3. Comparison among three sampling strategies across different prevalence levels.
+
+```{r}
+ggplot(data = full_data, aes(x = param, y = P_det, group = interaction(param, method_sp))) +
+    geom_boxplot(aes(color = method_sp)) +
+    scale_x_log10(breaks = full_data$param) +
+    coord_cartesian(ylim = c(0,1)) +
+    labs(x = "Number of contamination points", y = "Probability of detection") +
+    theme_bw()
+```
+
+4. Run ANOVA to compare the mean probability of detection for three sampling strategies.
+
+```{r}
+f_anova = function(val){
+  mod = aov(formula = P_det ~ as.factor(method_sp), data = subset(x = full_data, subset = param == val))
+  summary(mod)
+}
+
+map(.x = vals, .f = f_anova)
+```
+
+5. Compare the variances among the three sampling strategies using Brown-Forsythe Levene's test.
+
+```{r}
+f_bfl = function(val){
+  levene.test(y = subset(x = full_data, subset = param == val, select = P_det, drop = TRUE), group = subset(x = full_data, subset = param == val, select = method_sp, drop = TRUE), location = "median")
+}
+
+map(.x = vals, .f = f_bfl)
+```

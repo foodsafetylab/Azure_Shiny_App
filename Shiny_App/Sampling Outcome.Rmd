@@ -1,0 +1,221 @@
+---
+title: "Sampling Outcome"
+author: "Xianbin Cheng"
+date: "September 10, 2018"
+output: html_document
+---
+
+# Method  
+
+1. Load libraries and source R code.
+
+```{r, message = FALSE, warning = FALSE}
+source("Sampling_libraries.R")
+source("Sampling_plan.R")
+source("Sampling_contamination.R")
+source("Sampling_outcome.R")
+source("Sampling_visualization.R")
+source("Sampling_assay.R")
+# library(plotly)
+```
+
+```{r}
+sessionInfo()
+```
+
+2. List important parameters from previous R files.
+
+**Contamination:**  
+
+  * `n_contam` = the number of contamination points 
+  * `x_lim` = the limits of the horizontal axis  
+  * `y_lim` = the limits of the vertical axis  
+  * `x` = the horizontal coordinate of the contamination center, which follows a uniform distribution (`U(0,10)`)
+  * `y` = the vertical coordinate of the contamination center, which follows a uniform distribution(`U(0,10)`)  
+  * `cont_level` = a vector that indicates the mean contamination level (logCFU/g or logCFU/mL) and the standard deviation in a log scale, assuming contamination level follows a log normal distribution $ln(cont\_level)$~$N(\mu, \sigma^2)$. 
+  * `spread` = the type of spread: `continuous` or `discrete`.
+
+  **Mode 1: Discrete Spread** 
+
+  * `n_affected` = the number of affected plants near the contamination spot, which follows a Poisson distribution (`Pois(lambda = 5)`)   
+  * `covar_mat` = covariance matrix of `x` and `y`, which defines the spread of contamination. Assume the spread follows a 2D normal distribution with var(X) =     0.25, var(Y) = 0.25 and cov(X, Y) = 0  
+
+  **Mode 2: Continuous Spread**
+
+  * `spread_radius` = the radius of the contamination spread. 
+  * `LOC` = the limit of contribution of contamination. By default, it is set at 0.001.(Both `spread_radius` and `LOC` determine the shape of decay function that describes how much contamination from the source is contributed to a target point.)
+  * `fun` = the decay function that describes the spread. It takes either "exp" or "norm".
+
+**Sampling Plan:**  
+
+  * `method_sp` = the sampling method (SRS, STRS, SS)
+  * `n_sp` = the number of sampling points
+  * `sp_radius` = the radius (m) of a circular region around the sample point. (Only applicable to **Mode 1: Discrete Spread**)
+  * `n_strata` = the number of strata (applicable to *Stratified random sampling*)
+  * `by` = the side along which the field is divided into strata. It is either "row" or "column" (applicable to *Stratified random sampling*) **OR** the side along which a sample is taken every k steps (applicable to *Systematic sampling*).
+  * `m_kbar` = averaged kernel weight (g). By default, it's 0.3 g (estimated from Texas corn).
+  * `m_sp` = the analytical sample weight (25 g)
+  * `conc_good` = concentration of toxin in healthy kernels
+
+**Sampling Assay:**
+  
+* `method_det` = method of detection  
+      + Plating: LOD = 2500 CFU/g  
+      + Enrichment: LOD = 1 CFU/g  
+      + ELISA: LOD = 1 ng/g (Helica Total Aflatoxins ELISA kit)  
+  
+  **Mode 1: Discrete Spread:**  
+      * `Mc` = maximum concentration limit of mycotoxin (ng/g or ppb)
+  
+  **Mode 2: Continuous Spread:**  
+      * `case` = 1 ~ 15 cases that define the stringency of the sampling plan.  
+      * Attributes plans:  
+          + `n` = number of analytical units (25g)  
+          + `c` = maximum allowable number of analytical units yielding positive results  
+          + `m` = microbial count or concentration above which an analytical unit is considered positive  
+          + `M` = microbial count or concentration, if any analytical unit is above `M`, the lot is rejected.  
+
+```{r}
+## Contamination
+n_contam = rpois(n = 1, lambda = 3)
+x_lim = c(0, 10)
+y_lim = c(0, 10)
+cont_level = c(7, 1)
+spread = "continous"
+
+### Mode 1
+n_affected = rpois(n = 1, lambda = 5)
+covar_mat = matrix(data = c(0.25, 0, 0, 0.25), nrow = 2, ncol = 2)
+
+### Mode 2
+spread_radius = 2.5
+LOC = 10^(-3)
+fun = "exp"
+
+## Sampling plan
+method_sp = "srs"
+n_sp = 10
+sp_radius = 1
+n_strata = 5
+by = "row"
+m_kbar = 0.3
+m_sp = 25
+conc_good = 0.1
+
+## Assay
+case = 9
+m = 50
+M = 500
+Mc = 20
+method_det = "plating"
+```
+
+3. Generate the simulation dataset.
+
+```{r}
+# Generate the coordinates of contamination points
+contam_xy = sim_contam(n_contam = n_contam, xlim = x_lim, ylim = y_lim, covariance = covar_mat, n_affected = n_affected, radius = spread_radius, cont_level = cont_level) 
+
+# Generate the coordinates of sample points
+sp_xy = sim_plan(method_sp = method_sp, n_sp = n_sp, xlim = x_lim, ylim = y_lim, radius = sp_radius, by = by)
+
+# Generate the distance matrix
+dist_contam_sp = calc_dist(df_contam = contam_xy, df_sp = sp_xy)
+
+# Combine contam_xy and sp_xy
+contam_sp_xy = gen_sim_data(df_contam = contam_xy, df_sp = sp_xy, spread_radius = spread_radius, LOC = LOC, fun = fun, dist = dist_contam_sp, sp_radius = sp_radius, m_kbar = m_kbar, m_sp = m_sp, conc_good = conc_good, cont_level = cont_level)
+```
+
+```{r}
+str(contam_sp_xy)
+
+summary(contam_sp_xy$label)
+```
+
+```{r}
+kable_styling(kable(contam_sp_xy, format = "html"), full_width = FALSE)
+```
+
+4. Evaluate the rate of detection (ROD) of the sampling plan.
+
+**Mode 1: Discrete Spread:**  
+
+* Determine which contamination points (spot and spread) are covered by sampling region with a radius of `r sp_radius`.
+
+**Mode 2: Continuous Spread:**  
+
+* Determine which sample points are within the contamination region with a radius of `r spread_radius`.
+
+```{r}
+calc_cover
+calc_cover_cont
+calc_cover_dis
+calc_ROD
+```
+
+5. Decide whether to accept or reject a lot.
+
+# Results  
+
+1. **Mode 1: Discrete Spread**
+
+```{r}
+overlay_draw(method_sp = method_sp, data = contam_sp_xy, spread = "discrete", xlim = x_lim, ylim = y_lim, n_strata = n_strata, by = by)
+```
+
+```{r}
+# Evaluation: 
+cover_dis = calc_cover(df_dist = dist_contam_sp, spread_radius = spread_radius, sp_radius = sp_radius, spread = "discrete")
+calc_ROD(df_cover = cover_dis, n_sp = n_sp, df_contam = contam_xy, spread = "discrete")
+```
+
+* Therefore, we detected `r length(unique(cover_dis$ID_contam))` out of `r nrow(contam_xy)` contamination points. The rate of detection is `r length(unique(cover_dis$ID_contam)) / nrow(contam_xy)`.
+
+```{r}
+assay_draw(df = contam_sp_xy, M = M, m = m, Mc = Mc, method_det = method_det, spread = "discrete", case = case)
+```
+
+```{r}
+words(x = lot_decision(data = contam_sp_xy, case = case, m = m, M = M, Mc = Mc, spread = "discrete", method_det = method_det))
+```
+
+
+2. **Mode 2: Continuous Spread**
+
+```{r}
+overlay_draw(method_sp = method_sp, data = contam_sp_xy, spread = "continuous", xlim = x_lim, ylim = y_lim)
+```
+
+```{r}
+contam_level_draw(dimension = "3d", method = fun, spread_radius = spread_radius, LOC = LOC, df_contam = contam_xy, xlim = x_lim, ylim = y_lim, interactive = FALSE)
+```
+
+
+```{r}
+# Evaluation: 
+cover_cont = calc_cover(df_dist = dist_contam_sp, spread_radius = spread_radius, sp_radius = sp_radius, spread = "continuous")
+calc_ROD(df_cover = cover_cont, n_sp = n_sp, df_contam = contam_xy, spread = "continuous")
+```
+
+* Therefore, `r length(unique(cover_cont$ID_sp))` out of `r n_sp` sample points detected contamination. The rate of detection is `r length(unique(cover_cont$ID_sp)) / n_sp`.
+
+```{r}
+assay_draw(df = contam_sp_xy, M = M, m = m, Mc = Mc, method_det = method_det, spread = "continuous", case = case)
+```
+
+```{r}
+words(x = lot_decision(data = contam_sp_xy, case = case, m = m, M = M, Mc = Mc, spread = "continuous", method_det = method_det))
+```
+
+
+```{r, eval= FALSE, echo = FALSE}
+pdf(file = "Sampling Plots SS.pdf")
+  plot_contam_dis
+  plot_sp_dis
+  plot_overlay_dis
+  plot_contam_cont
+  plot_sp_cont
+  plot_overlay_cont
+dev.off()
+```
+
