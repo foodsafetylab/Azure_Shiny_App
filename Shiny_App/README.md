@@ -1,5 +1,5 @@
-# ILSI Remote Repository
-This is a repository created and maintained by Xianbin (Eric) Cheng. It is built for a project supported by International Life Science Institute North America (ILSI N.A.) Food Microbiology Committee under the title "Simulating Larg-Number Bulk-Product Sampling to Improve Food Safety Sampling Plans". 
+# Food Safety Sampling Simulation
+This is a repository created by maintained by Xianbin (Eric) Cheng, and maintained by memeber sof the Stasiewicz lab at the University of Illinois. It is built for a projects supported by: (i) International Life Science Institute North America (ILSI N.A.) Food Microbiology Committee under the title "Simulating Larg-Number Bulk-Product Sampling to Improve Food Safety Sampling Plans". (ii) Center for Produce safety (CPS) under the title "Simulation analysis of in-field produce sampling for risk-based sampling plan development"
 
 ## Objective
 We are looking to build a model that takes various input parameters that are relevant to food safety scenarios and returns metrics that are associated with food safety risk. 
